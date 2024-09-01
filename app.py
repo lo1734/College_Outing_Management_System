@@ -1,4 +1,5 @@
-from flask import Flask, render_template,request,flash
+from flask import Flask, render_template, request, redirect, url_for, session, flash
+from werkzeug.security import check_password_hash
 import smtplib
 import os
 from flask_sqlalchemy import SQLAlchemy
@@ -10,7 +11,7 @@ app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] =\
         'sqlite:///' + os.path.join(basedir, 'data.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
+app.config['SECRET_KEY'] = 'your_secret_key'
 db = SQLAlchemy(app)
 class Student2(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -60,115 +61,344 @@ class Student4(db.Model):
         return f'<Student {self.firstname}>'
 @app.route('/')
 def home():
-   return render_template('index.html')
-@app.route('/login1',methods=['POST'])
+    if 'username' in session:
+        return redirect(url_for('guess'))
+    return render_template('index.html')
+from werkzeug.security import check_password_hash
+
+
+from werkzeug.security import check_password_hash
+import sqlite3 as sql
+from flask import Flask, render_template, request, redirect, url_for, session, flash
+
+@app.route('/login1', methods=['POST'])
 def login1():
-    name=request.form['username']
-    password=request.form['password']
-    error="U"
+    username = request.form['username']
+    password = request.form['password']
+    # Connect to the database
     con = sql.connect("data.db")
     cur = con.cursor()
-    statement = f"SELECT username from std WHERE username='{name}' AND Password = '{password}';"
-    cur.execute(statement)
-    if (name == "Hostelwarden" and password == "warden123"):
-        return render_template('admin.html')
-    if not cur.fetchone():
-        error="Username not found"
-        return render_template('index.html',error=error)
+    # Use parameterized query to prevent SQL injection
+    cur.execute("SELECT username, password FROM std WHERE username=?", (username,))
+    result = cur.fetchone()
+    # Close the connection
+    con.close()
+
+    if result:
+        db_username, db_password = result
+        # Check if the entered password matches the hashed password
+        if check_password_hash(db_password, password):
+            session['username'] = username
+            if username == 'hostelwarden':
+                return redirect(url_for('homeadmin'))
+            else:
+                return redirect(url_for('guess'))
+        else:
+            flash('Invalid username or password')
     else:
-        return render_template('index1.html')
+        flash('Invalid username or password')
+
+    return redirect(url_for('home'))
+
+
+
+# @app.route('/dashboard')
+# def dashboard():
+#     if 'username' in session:
+#         return render_template('index1.html', username=session['username'])
+#     return redirect(url_for('home'))
 @app.route('/guess')
 def guess():
-   return render_template('index1.html')
+    if 'username' in session:
+        return render_template('index1.html', username=session['username'])
+    return redirect(url_for('home'))
+
+
+@app.route('/logout')
+def logout():
+    session.pop('username', None)
+    flash('You have been logged out')
+    return redirect(url_for('home'))
+# @app.route('/guess')
+# def guess():
+#    return render_template('index1.html')
 @app.route('/set')
 def set():
-   return render_template('home.html')
+    if 'username' in session:
+        return render_template('home.html', username=session['username'])
+    return redirect(url_for('home'))
 @app.route('/outing')
 def outing():
-   return render_template('outing.html')
+    if 'username' in session:
+        return render_template('outing.html', username=session['username'])
+    return redirect(url_for('home'))
 @app.route('/leave')
 def leave():
-   return render_template('leave.html')
+    if 'username' in session:
+        return render_template('leave.html', username=session['username'])
+    return redirect(url_for('home'))
 @app.route('/rules')
 def rules():
-    return render_template('rules.html')
-@app.route('/login',methods=['POST'])
+    if 'username' in session:
+        return render_template('rules.html', username=session['username'])
+    return redirect(url_for('home'))
+
+
+@app.route('/login', methods=['POST'])
 def recieve_data():
-   name=request.form['name']
-   rollnumber=request.form['Rollnumber']
-   place=request.form['place']
-   course=request.form['coursem']
-   hostelname=request.form['hostel']
-   roomno=request.form['roomno']
-   phno=request.form['phonenumber']
-   parentphno = request.form['parentphoneNumber']
-   email=request.form['email']
-   outime=request.form['outtime']
-   intime=request.form['intime']
-   sendemail(name,rollnumber,place,course,hostelname,roomno,phno,parentphno,email,outime,intime)
-   user1 = Student2(name=name, rollnumber=rollnumber,place=place, course=course, hostelname=hostelname, roomno=roomno, phonenumber=phno,
-                parentphno=parentphno, email=email,outime=outime,intime=intime)
-   db.session.add(user1)
-   db.session.commit()
-   return render_template('granted.html',name=name,rollnumber=rollnumber,place=place,course=course,hostelname=hostelname,roomno=roomno,phno=phno,parentphno=parentphno,email=email,outime=outime,intime=intime)
-@app.route('/leave',methods=['POST'])
+    # Check if the user is logged in
+    if 'username' not in session:
+        return redirect(url_for('home'))
+    # Retrieve form data
+    name = request.form['name']
+    rollnumber = request.form['Rollnumber']
+    place = request.form['place']
+    course = request.form['coursem']
+    hostelname = request.form['hostel']
+    roomno = request.form['roomno']
+    phno = request.form['phonenumber']
+    parentphno = request.form['parentphoneNumber']
+    email = request.form['email']
+    outime = request.form['outtime']
+    intime = request.form['intime']
+
+    # Validate roll number
+    if rollnumber != session['username']:
+        flash('Roll number does not match the logged-in username')
+        return redirect(url_for('outing'))
+
+
+    # Call function to send an email
+    sendemail(name, rollnumber, place, course, hostelname, roomno, phno, parentphno, email, outime, intime)
+
+    # Create a new Student2 object and add it to the database
+    user1 = Student2(name=name, rollnumber=rollnumber, place=place, course=course, hostelname=hostelname, roomno=roomno,
+                     phonenumber=phno, parentphno=parentphno, email=email, outime=outime, intime=intime)
+    db.session.add(user1)
+    db.session.commit()
+
+    # Render the granted page with the provided data
+    return render_template('granted.html', name=name, rollnumber=rollnumber, place=place, course=course,
+                           hostelname=hostelname, roomno=roomno, phno=phno, parentphno=parentphno, email=email,
+                           outime=outime, intime=intime)
+
+
+@app.route('/leave', methods=['POST'])
 def recieves_data():
-   name=request.form['name']
-   rollnumber=request.form['Rollnumber']
-   course=request.form['coursem']
-   hostelname=request.form['hostel']
-   homeaddress=request.form['homeaddress']
-   roomno=request.form['roomno']
-   phno=request.form['phonenumber']
-   parentphno = request.form['parentphoneNumber']
-   email=request.form['email']
-   purpose=request.form['purposeof']
-   noofdays=request.form['noofdays']
-   fromdate=request.form['From']
-   todate=request.form['To']
-   file=request.form['file']
-   outime=request.form['outtime']
-   intime=request.form['intime']
-   sendemailleave(name=name,rollnumber=rollnumber,course=course,homeaddress=homeaddress,hostelname=hostelname,roomno=roomno,phno=phno,parentphno=parentphno,purpose=purpose,noofdays=noofdays,fromdate=fromdate,todate=todate,email=email,outime=outime,intime=intime)
-   user1 = Student4(name=name, rollnumber=rollnumber,course=course, hostelname=hostelname,homeaddress=homeaddress, roomno=roomno,
-                    phonenumber=phno,
-                    parentphno=parentphno,purpose=purpose,noofdays=noofdays, email=email,fromdate=fromdate,todate=todate, outime=outime, intime=intime)
-   db.session.add(user1)
-   db.session.commit()
-   return render_template('grantedleave.html',name=name,rollnumber=rollnumber,course=course,hostelname=hostelname,homeaddress=homeaddress,roomno=roomno,phno=phno,parentphno=parentphno,email=email,purpose=purpose,noofdays=noofdays,fromdate=fromdate,todate=todate,outime=outime,intime=intime)
+    # Check if the user is logged in
+    if 'username' not in session:
+        return redirect(url_for('home'))
+
+    # Retrieve form data
+    name = request.form['name']
+    rollnumber = request.form['Rollnumber']
+    course = request.form['coursem']
+    hostelname = request.form['hostel']
+    homeaddress = request.form['homeaddress']
+    roomno = request.form['roomno']
+    phno = request.form['phonenumber']
+    parentphno = request.form['parentphoneNumber']
+    email = request.form['email']
+    purpose = request.form['purposeof']
+    noofdays = request.form['noofdays']
+    fromdate = request.form['From']
+    todate = request.form['To']
+    file = request.form['file']
+    outime = request.form['outtime']
+    intime = request.form['intime']
+
+    # Validate roll number
+    if rollnumber != session['username']:
+        flash('Roll number does not match the logged-in username')
+        return redirect(url_for('outing'))
+    # Call function to send an email
+    sendemailleave(name=name, rollnumber=rollnumber, course=course, homeaddress=homeaddress, hostelname=hostelname,
+                   roomno=roomno, phno=phno, parentphno=parentphno, purpose=purpose, noofdays=noofdays,
+                   fromdate=fromdate, todate=todate, email=email, outime=outime, intime=intime)
+
+    # Create a new Student4 object and add it to the database
+    user1 = Student4(name=name, rollnumber=rollnumber, course=course, hostelname=hostelname, homeaddress=homeaddress,
+                     roomno=roomno, phonenumber=phno, parentphno=parentphno, purpose=purpose, noofdays=noofdays,
+                     email=email, fromdate=fromdate, todate=todate, outime=outime, intime=intime)
+    db.session.add(user1)
+    db.session.commit()
+
+    # Render the granted leave page with the provided data
+    return render_template('grantedleave.html', name=name, rollnumber=rollnumber, course=course,
+                           hostelname=hostelname, homeaddress=homeaddress, roomno=roomno, phno=phno,
+                           parentphno=parentphno, email=email, purpose=purpose, noofdays=noofdays,
+                           fromdate=fromdate, todate=todate, outime=outime, intime=intime)
+
+
 @app.route('/admin')
 def admin():
-   return render_template('admin.html')
+    if 'username' in session:
+        return render_template('admin.html', username=session['username'])
+    return redirect(url_for('home'))
 @app.route('/outingadmin')
 def outingadmin():
-   students=Student2.query.all()
-   return render_template('outingadmin.html',students=students)
+    if 'username' not in session:
+        return redirect(url_for('home'))
+    students = Student2.query.all()
+    return render_template('outingadmin.html', students=students)
+
 @app.route('/leaveadmin')
 def leaveadmin():
-   students=Student4.query.all()
-   return render_template('leaveadmin.html',students=students)
+    if 'username' not in session:
+        return redirect(url_for('home'))
+    students = Student4.query.all()
+    return render_template('leaveadmin.html', students=students)
+
 @app.route('/homeadmin')
 def homeadmin():
-    return render_template('homeadmin.html')
-def sendemail(name,rollnumber,place,course,hostelname,roomno,phno,parentphno,email,outime,intime):
-   my_email = "iiitkottayamcoms@gmail.com"
-   password = "qwyxksuejdmsglin"
-   with smtplib.SMTP('smtp.gmail.com') as connection:
-      connection.starttls()
-      connection.login(user=my_email, password=password)
-      email_message = f"Subject:College Outing Management System(coms)\n\n" \
-                      f"Your outing to {place} from {outime} to {intime} has been approved by the Hostel Warden.\n\n\n\n" \
-                      f"Outing details - \n"\
-                      f"Name: {name}\nRollNumber:{rollnumber}\nplace to visit:{place}\nCourse and semester:{course}\n Hostel:{hostelname}\nRoomNo:{roomno}\nphonenumber:{phno}\nparent phonenumber:{parentphno}\noutime:{outime}\nIntime:{intime}"
-      connection.sendmail(from_addr=my_email, to_addrs=email, msg=email_message)
+    if 'username' in session:
+        return render_template('homeadmin.html', username=session['username'])
+    return redirect(url_for('home'))
+
+
+def sendemail(name, rollnumber, place, course, hostelname, roomno, phno, parentphno, email, outime, intime):
+    my_email = "iiitkottayamcoms@gmail.com"
+    password = "qwyxksuejdmsglin"
+
+    # Create the HTML email content
+    email_message = f"""\
+    <html>
+    <body>
+        <p>Dear {name},</p>
+        <p>Your outing to {place} from {outime} to {intime} has been approved by the Hostel Warden.</p>
+        <table border="1" cellpadding="5" cellspacing="0">
+            <tr>
+                <th>Name</th>
+                <td>{name}</td>
+            </tr>
+            <tr>
+                <th>Roll Number</th>
+                <td>{rollnumber}</td>
+            </tr>
+            <tr>
+                <th>Place to Visit</th>
+                <td>{place}</td>
+            </tr>
+            <tr>
+                <th>Course and Semester</th>
+                <td>{course}</td>
+            </tr>
+            <tr>
+                <th>Hostel Name</th>
+                <td>{hostelname}</td>
+            </tr>
+            <tr>
+                <th>Room Number</th>
+                <td>{roomno}</td>
+            </tr>
+            <tr>
+                <th>Phone Number</th>
+                <td>{phno}</td>
+            </tr>
+            <tr>
+                <th>Parent Phone Number</th>
+                <td>{parentphno}</td>
+            </tr>
+            <tr>
+                <th>Out Time</th>
+                <td>{outime}</td>
+            </tr>
+            <tr>
+                <th>In Time</th>
+                <td>{intime}</td>
+            </tr>
+        </table>
+    </body>
+    </html>
+    """
+
+    # Send the email
+    try:
+        with smtplib.SMTP('smtp.gmail.com', 587) as connection:
+            connection.starttls()
+            connection.login(user=my_email, password=password)
+            connection.sendmail(
+                from_addr=my_email,
+                to_addrs=email,
+                msg=f"Subject: College Outing Management System (COMS)\nContent-Type: text/html\n\n{email_message}"
+            )
+        print(f"Email sent to {email}")  # Debug output
+    except Exception as e:
+        print(f"Failed to send email: {e}")  # Debug output
+
+
 def sendemailleave(name,rollnumber,course,hostelname,homeaddress,roomno,phno,parentphno,email,purpose,noofdays,fromdate,todate,outime,intime):
    my_email = "iiitkottayamcoms@gmail.com"
    password = "qwyxksuejdmsglin"
    with smtplib.SMTP('smtp.gmail.com') as connection:
       connection.starttls()
       connection.login(user=my_email, password=password)
-      email_message = f"Subject:college outing management system(coms)\n\n" \
-                      f"Dear {name},\nYour leave has been apporved by our institution head\nName: {name}\nRollNumber:{rollnumber}\nCourse and semester:{course}\nHostelName:{hostelname}\nHomeaddress:{homeaddress}\nRoomNo:{roomno}\nphonenumber:{phno}\nparent phonenumber:{parentphno}\npurpose of leave:{purpose}\nNo of days:{noofdays}\nFrom:{fromdate}\nTo:{todate}\noutime:{outime}\nIntime:{intime}"
+      email_message = f"""\
+          <html>
+          <body>
+              <p>Dear {name},</p>
+              <p>Your leave has been approved by our institution head.</p>
+              <table border="1" cellpadding="5" cellspacing="0">
+                  <tr>
+                      <th>Name</th>
+                      <td>{name}</td>
+                  </tr>
+                  <tr>
+                      <th>Roll Number</th>
+                      <td>{rollnumber}</td>
+                  </tr>
+                  <tr>
+                      <th>Course and Semester</th>
+                      <td>{course}</td>
+                  </tr>
+                  <tr>
+                      <th>Hostel Name</th>
+                      <td>{hostelname}</td>
+                  </tr>
+                  <tr>
+                      <th>Home Address</th>
+                      <td>{homeaddress}</td>
+                  </tr>
+                  <tr>
+                      <th>Room Number</th>
+                      <td>{roomno}</td>
+                  </tr>
+                  <tr>
+                      <th>Phone Number</th>
+                      <td>{phno}</td>
+                  </tr>
+                  <tr>
+                      <th>Parent Phone Number</th>
+                      <td>{parentphno}</td>
+                  </tr>
+                  <tr>
+                      <th>Purpose of Leave</th>
+                      <td>{purpose}</td>
+                  </tr>
+                  <tr>
+                      <th>No. of Days</th>
+                      <td>{noofdays}</td>
+                  </tr>
+                  <tr>
+                      <th>From</th>
+                      <td>{fromdate}</td>
+                  </tr>
+                  <tr>
+                      <th>To</th>
+                      <td>{todate}</td>
+                  </tr>
+                  <tr>
+                      <th>Out Time</th>
+                      <td>{outime}</td>
+                  </tr>
+                  <tr>
+                      <th>In Time</th>
+                      <td>{intime}</td>
+                  </tr>
+              </table>
+          </body>
+          </html>
+          """
       connection.sendmail(from_addr=my_email, to_addrs=email, msg=email_message)
 if __name__ == '__main__':
    app.run(debug=True)
