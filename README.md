@@ -20,7 +20,6 @@ The College Outing Management System (COMS) is a web application designed to man
 - Python 3.x
 - Flask 1.x or higher
 - MySQL database
-- 
 # Start the Development Server
 Run the Flask development server to start the application:
 flask db init
